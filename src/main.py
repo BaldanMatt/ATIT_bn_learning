@@ -15,21 +15,56 @@ data = np.array([
     [2.344, 2.823, 14.594, 10.383]
 ])
 
+def estimate_parameters(structure, data) -> dict:
+    n_obs, n_vars = data.shape
+    fit_results = {}
+    for ivar, var_name in enumerate(structure.keys()):
+        dependent_vars = structure.get(var_name, [])
+        if len(dependent_vars)==0:
+            # then var is independent
+            intercept = np.mean(data[:, ivar])
+            residuals = data[:, ivar] - intercept
+            #print("RESIDUALS: ", np.var(residuals))
+            #print("RESIDUALS SQUARED: ", np.var(residuals)**2)
+            #print("SQRT RESIDUALS VARIANCE: ", np.sqrt(np.var(residuals)))
+            fit_results[ivar] = {
+                "intercept": intercept,
+                "coefficients": np.zeros(n_vars),
+                "residual_variance": np.var(residuals, ddof=1)
+            }
+        else:
+            mask = [map_nodes_to_indexes[var] for var in dependent_vars]
+            X = data[:, mask] 
+            y = data[:, ivar]
+            reg = LinearRegression(fit_intercept=True).fit(X, y)
+            intercept = reg.intercept_
+            coefficients = reg.coef_
+            residuals = y - reg.predict(X)
+            #print("RESIDUALS: ", np.var(residuals))
+            #print("RESIDUALS SQUARED: ", np.var(residuals)**2)
+            #print("SQRT RESIDUALS VARIANCE: ", np.sqrt(np.var(residuals)))
+            fit_results[ivar] = {
+                "intercept": intercept,
+                "coefficients": coefficients,
+                "residual_variance": np.var(residuals, ddof = X.shape[1])
+            }
+    return fit_results
+
 from pgmpy.base import DAG
 import matplotlib.pyplot as plt
 import networkx as nx
 def draw_pgm(ax, model, pos: dict = None, title: str = None):
     #Init network instance
-    G = nx.DiGraph()
+    g = nx.DiGraph()
 
     #Add nodes and edges
-    G.add_nodes_from(model.nodes())
-    G.add_edges_from(model.edges())
+    g.add_nodes_from(model.nodes())
+    g.add_edges_from(model.edges())
 
     if pos is None:
         pos = nx.circular_layout(G)
 
-    nx.draw(G, pos,
+    nx.draw(g, pos,
         with_labels=True,
         node_size = 1000, node_color = "skyblue",
         font_size = 10, font_weight = "bold",
@@ -37,148 +72,72 @@ def draw_pgm(ax, model, pos: dict = None, title: str = None):
     ax.set_title(title)
 
 df = pd.DataFrame(data, columns=['X1', 'X2', 'X3', 'X4'])
-G = DAG()
 
 map_nodes_to_indexes = {node: i for i, node in enumerate(df.columns)}
-G.add_nodes_from(nodes=['X1', 'X2', 'X3', 'X4'])
-
-#edges_example = [("X1","X4"),("X2","X4"),("X4","X3")]
-edges_example = [("X1","X2"),("X2","X4"),("X2","X3")]
-G.add_edges_from(ebunch=edges_example)
-
-fig, axs = plt.subplots(1, 1, figsize=(5, 5))
-draw_pgm(axs, G)
-plt.show()
 
 from sklearn.linear_model import LinearRegression
 
-model_structure = {var: list(G.predecessors(var)) for var in G.nodes()}
-print(model_structure)
-
-n_obs, n_vars = data.shape
-
-fit_results = {}
-for ivar, var_name in enumerate(model_structure.keys()):
-    print("Fitting variable...", var_name)
-    dependent_vars = model_structure.get(var_name, [])
-    print("\tDependent variables: ", dependent_vars)
-    if len(dependent_vars)==0:
-        # then var is independent
-        intercept = np.mean(data[:, ivar])
-        residuals = data[:, ivar] - intercept
-        fit_results[ivar] = {
-            "intercept": intercept,
-            "coefficients": np.zeros(n_vars),
-            "residual_variance": np.var(residuals)
-        }
-    else:
-        mask = [map_nodes_to_indexes[var] for var in dependent_vars]
-        X = data[:, mask] 
-        print("\t\t train data to fit the model:\n", X)
-        y = data[:, ivar]
-        print("\t\t target data to fit the model:\n", y)
-        reg = LinearRegression(fit_intercept=True).fit(X, y)
-        intercept = reg.intercept_
-        coefficients = reg.coef_
-        print("\t\t coefficients:\n", coefficients)
-        residuals = y - reg.predict(X)
-        fit_results[ivar] = {
-            "intercept": intercept,
-            "coefficients": coefficients,
-            "residual_variance": np.var(residuals)
-        }
-
-print(pd.DataFrame(fit_results))
-bn_entropy = 0
-for var, results in fit_results.items():
-    bn_entropy += 0.5 + 0.5*np.log(2*np.pi*results["residual_variance"])
-print(bn_entropy)
+edges_example_1 = [("X1","X4"),("X2","X4"),("X4","X3")]
+edges_example_2 = [("X1","X2"),("X2","X4"),("X2","X3")]
 
 
-#
-#print("shape of the data:\n",data.shape)
-#
-#sd_list = np.std(data, axis=0)
-#print(sd_list)
-#
-#
-#cov_matrix = np.cov(data.T)
-#print("cov matrix:\n",cov_matrix)
-#det_cov_matrix = np.linalg.det(cov_matrix)
-#print("det cov matrix:\n",det_cov_matrix)
-#joint_entropy_bn = 0.5*cov_matrix.shape[0]*np.log(2*np.pi*np.e) + 0.5*np.log(det_cov_matrix)
-#
-#print(joint_entropy_bn)
-#
-#print(data.shape)
-#print(np.std(data,axis=0))
-#print(np.std(data[:,3])**2-(1.5**2)*0.8+(2.6**2)*0.6)
-#
-#
-#print("test:\n", np.std(data[:,3])**2-cov_matrix[3,0]/cov_matrix[0,0] - cov_matrix[3,1]/cov_matrix[1,1])
-#
-#n_random_vars = data.shape[1]
-#
-#for i in range(n_random_var
-#
-#from pgmpy.estimators import HillClimbSearch, PC, ExhaustiveSearch
-#from pgmpy.base import DAG
-#
-#G = DAG()
-#G.add_nodes_from(nodes=['X1', 'X2', 'X3', 'X4'])
-#
-#G.add_edges_from(ebunch=[("X1","X2"),("X2","X4"),("X2","X3")])
-#
-#from pgmpy.utils import get_example_model
-#model = get_example_model('alarm')
-#
-#print(type(model))  
-#
-#from pgmpy.models import BayesianNetwork
-#
-#df = pd.DataFrame(data, columns=['X1', 'X2', 'X3', 'X4'])
-#from pgmpy.estimators import MaximumLikelihoodEstimator
-#from pgmpy.estimators import BicScore
-#
-#bn = BayesianNetwork
-#
-#hill_climb = HillClimbSearch(df)
-#
-#best_model = hill_climb.estimate(scoring_method="bdeuscore")
-#
-#import networkx as nx
-#import matplotlib.pyplot as plt
-#
-#def draw_pgm(ax, model, pos: dict = None, title: str = None):
-   #Init network instance
-  #G = nx.DiGraph()
-#
-   #Add nodes and edges
-  #G.add_nodes_from(model.nodes())
-  #G.add_edges_from(model.edges())
-#
-  #if pos is None:
-    #pos = nx.circular_layout(G)
-#
-  #nx.draw(G, pos,
-        #with_labels=True,
-        #node_size = 1000, node_color = "skyblue",
-        #font_size = 10, font_weight = "bold",
-        #arrowsize=30, ax=ax)
-  #ax.set_title(title)
-#
-#SCORES = ["k2score","bdeuscore","bicscore","aicscore"]
-#best_models = []
-#
-#ncols = len(SCORES)//2
-#fig, axs = plt.subplots(ncols, ncols, figsize=(10, 10))
-#axs = axs.flatten()
-#for iplot, score in enumerate(SCORES):
-    #best_model = hill_climb.estimate(scoring_method=score)
-    #best_models.append(best_model)
-    #print(f"Best model with {score}: {best_model.edges()}")
-    #draw_pgm(axs[iplot], best_model, title=score)
-#plt.show()
-#
+
+structure_pair = (edges_example_1, edges_example_2)
+associated_data_list = []
+fit_results_list = []
+for istruct, edges_example in enumerate(structure_pair):
+    print("STRUCTURE ", edges_example)
+    G = nx.DiGraph()
+    G.add_nodes_from(['X1', 'X2', 'X3', 'X4'])
+    G.add_edges_from(edges_example)
+
+    fig, axs = plt.subplots(1, 1, figsize=(5, 5))
+    draw_pgm(axs, G)
+    plt.show()
+
+## INIT MODEL STRUCTURE BASED ON BAYESIAN NETWORK G STRUCTURE
+    model_structure = {var: list(G.predecessors(var)) for var in G.nodes()}
+    print("MODEL STRUCTURE: \n\t", model_structure)
+
+#### ESTIMATE PARAMETERS ####
+    fit_results = estimate_parameters(model_structure, data)
+    associated_data = np.zeros(data.shape)
+    for ivar, var_name in enumerate(model_structure.keys()):
+        dependent_vars = model_structure.get(var_name, [])
+        if len(dependent_vars)==0:
+            associated_data[:, ivar] = fit_results[ivar]["intercept"]
+        else:
+            associated_data[:,ivar] = fit_results[ivar]["intercept"] + np.dot(data[:, [map_nodes_to_indexes[var] for var in dependent_vars]], fit_results[ivar]["coefficients"])
+
+    #print("ASSOCIATED DATA: \n", associated_data)
+    associated_data_list.append(associated_data)
+    fit_results_list.append(fit_results)
+            
+    #### COMPUTE SCORE ####
+    bn_entropy = 0
+    for var, results in fit_results.items():
+        bn_entropy += 0.5 + 0.5*np.log(2*np.pi*results["residual_variance"])
+
+    #### PRINT RESULTS ####
+    print("FIT RESULTS: \n", pd.DataFrame(fit_results))
+    print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
+
+norm_l2_list = []
+kl = 0
+for ivar in range(data.shape[1]):
+    norm_l2 = np.linalg.norm(associated_data_list[0][:, ivar] - associated_data_list[1][:, ivar], ord=2)
+    norm_l2_list.append(norm_l2)
+    kl_ivar = 0.5 * (
+                    np.log(fit_results_list[1][ivar]["residual_variance"] / fit_results_list[0][ivar]["residual_variance"]) \
+                    + fit_results_list[0][ivar]["residual_variance"] / fit_results_list[1][ivar]["residual_variance"] \
+                    - 1 \
+                    ) \
+                    + 1/(2*data.shape[0]) * ( norm_l2 / fit_results_list[1][ivar]["residual_variance"] )
+    print("KL FOR VAR ", ivar, " : ", kl_ivar)
+    kl += kl_ivar
 
 
+#### UPDATE STRUCTURE BASED ON SCORE ####
+##### COMPUTE ALL LEGAL MOVES ######
+
+print("KL BETWEEN EXAMPLES: ", kl)
