@@ -19,7 +19,7 @@ def estimate_parameters(structure : dict, data : np.array, map_nodes_to_indexes 
             # then var is independent
             intercept = np.mean(data[:, ivar])
             residuals = data[:, ivar] - intercept
-            fit_results[ivar] = {
+            fit_results[var_name] = {
                 "intercept": intercept,
                 "coefficients": np.zeros(n_vars),
                 "residual_variance": np.var(residuals, ddof=1)
@@ -32,7 +32,7 @@ def estimate_parameters(structure : dict, data : np.array, map_nodes_to_indexes 
             intercept = reg.intercept_
             coefficients = reg.coef_
             residuals = y - reg.predict(X)
-            fit_results[ivar] = {
+            fit_results[var_name] = {
                 "intercept": intercept,
                 "coefficients": coefficients,
                 "residual_variance": np.var(residuals, ddof = X.shape[1])

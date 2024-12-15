@@ -28,8 +28,9 @@ def random_arc_change(graph : nx.DiGraph):
     graph.remove_edge(*edge_removed)
     print("removed", edge_removed)
     nodes = list(nx.topological_sort(graph))
-    edge_added = [e for e in graph.edges][0]
+    edge_added = [(u,v) for u,v in graph.edges][0]
     while edge_added in graph.edges:
+        print("retrying, edge ", edge_added, " already in graph")
         edge_added = random.sample(list(graph.nodes), k=2)
         if nodes.index(edge_added[0]) > nodes.index(edge_added[1]):
             edge_added = (edge_added[1], edge_added[0])
