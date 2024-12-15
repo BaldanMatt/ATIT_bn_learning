@@ -41,12 +41,15 @@ G.add_nodes_from(coulumns_names)
 G.add_edges_from(edges_example_2)
 winning_graph = G.copy()
 
-
-# for istruct, edges_example in enumerate(structure_pair):
 MAX_ITERATIONS=10
+EARLY_STOP_COUNTER=0
+EARLY_STOP_TH=3
+# the first time we have to compute all nodes' entropies
+changed_nodes=list(G.nodes)
 associated_data_old = np.zeros(data.shape)
 for istruct in range(MAX_ITERATIONS):
     print("STRUCTURE ", list(G.edges))
+    print("CHANGED NODES ", changed_nodes)
 
     fig, axs = plt.subplots(1, 1, figsize=(5, 5))
     draw_pgm(axs, G)
@@ -58,16 +61,24 @@ for istruct in range(MAX_ITERATIONS):
     ## INIT MODEL STRUCTURE BASED ON BAYESIAN NETWORK G STRUCTURE
     model_structure = {var: list(G.predecessors(var)) for var in G.nodes()}
     print("\n\nMODEL STRUCTURE: \n\t", model_structure)
+    new_struct = dict()
+    for node in model_structure.keys():
+        if node in changed_nodes:
+            new_struct[node] = model_structure[node]
+    model_structure = new_struct
+    print("CHANGED STRUCTURE: \n\t", model_structure)
 
     #### ESTIMATE PARAMETERS ####
     fit_results = estimate_parameters(model_structure, data, map_nodes_to_indexes)
-    associated_data = np.zeros(data.shape)
-    for ivar, var_name in enumerate(model_structure.keys()):
+    associated_data = associated_data_old.copy()
+    for var_name in model_structure.keys():
+        ivar = map_nodes_to_indexes[var_name]
         dependent_vars = model_structure.get(var_name, [])
         if len(dependent_vars)==0:
             associated_data[:, ivar] = fit_results[ivar]["intercept"]
         else:
-            associated_data[:,ivar] = fit_results[ivar]["intercept"] + np.dot(data[:, [map_nodes_to_indexes[var] for var in dependent_vars]], fit_results[ivar]["coefficients"])
+            associated_data[:,ivar] = fit_results[ivar]["intercept"] \
+                    + np.dot(data[:, [map_nodes_to_indexes[var] for var in dependent_vars]], fit_results[ivar]["coefficients"])
 
     # print("ASSOCIATED DATA: \n", associated_data)
     associated_data_list.append(associated_data)
@@ -85,13 +96,21 @@ for istruct in range(MAX_ITERATIONS):
     if bn_entropy < bn_entoropy_old :
         bn_entoropy_old = bn_entropy
         winning_graph = G.copy()
+    else:
+        # reset to last best
+        G = winning_graph.copy()
+        EARLY_STOP_COUNTER += 1
 
     #### PRINT RESULTS ####
     print("FIT RESULTS: \n", pd.DataFrame(fit_results))
     print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
 
+    if EARLY_STOP_COUNTER > EARLY_STOP_TH:
+        break
+
     #### CHAGNE GRAPH BEFORE REPEATING ####
-    random_arc_change(G)
+    edge_removed, edge_added = random_arc_change(G)
+    changed_nodes=[edge_removed[1], edge_added[1]]
 
 print("\n\nWINNING_STRUCTURE: ",{var: list(winning_graph.predecessors(var)) \
         for var in winning_graph.nodes()})

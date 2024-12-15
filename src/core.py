@@ -12,7 +12,8 @@ def estimate_parameters(structure : dict, data : np.array, map_nodes_to_indexes 
     """
     n_obs, n_vars = data.shape
     fit_results = {}
-    for ivar, var_name in enumerate(structure.keys()):
+    for var_name in structure.keys():
+        ivar = map_nodes_to_indexes[var_name]
         dependent_vars = structure.get(var_name, [])
         if len(dependent_vars)==0:
             # then var is independent
