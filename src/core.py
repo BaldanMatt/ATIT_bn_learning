@@ -38,3 +38,21 @@ def estimate_parameters(structure : dict, data : np.array, map_nodes_to_indexes 
             }
     return fit_results
 
+def kl_bn(associated_data_old, associated_data_new, fit_results_old, fit_results_new):
+    """
+    Returns the KL divergence between two bayesian networks
+    """
+    kl = 0
+    norm_l2_list = np.linalg.norm(associated_data_old - associated_data_new, ord=2, axis=0)
+    for ivar in range(associated_data_old.shape[1]):
+        norm_l2 = norm_l2_list[ivar]
+        kl_ivar = 0.5 * (
+                        np.log(fit_results_new[ivar]["residual_variance"] / fit_results_old[ivar]["residual_variance"]) \
+                        + fit_results_old[ivar]["residual_variance"] / fit_results_new[ivar]["residual_variance"] \
+                        - 1 \
+                        ) \
+                        + 1/(2*associated_data_old.shape[0]) * ( norm_l2 / fit_results_new[ivar]["residual_variance"] )
+        print("KL FOR VAR ", ivar, " : ", kl_ivar)
+        kl += kl_ivar
+    return kl
+

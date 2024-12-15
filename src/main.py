@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import networkx as nx
 from utils import draw_pgm, random_arc_change
-from core import estimate_parameters
+from core import estimate_parameters, kl_bn
 
 # this is sample data copied from the tutorial paper
 data = np.array([
@@ -44,9 +44,9 @@ winning_graph = G.copy()
 
 # for istruct, edges_example in enumerate(structure_pair):
 MAX_ITERATIONS=10
+associated_data_old = np.zeros(data.shape)
 for istruct in range(MAX_ITERATIONS):
     print("STRUCTURE ", list(G.edges))
-    random_arc_change(G)
 
     fig, axs = plt.subplots(1, 1, figsize=(5, 5))
     draw_pgm(axs, G)
@@ -55,11 +55,11 @@ for istruct in range(MAX_ITERATIONS):
     else:
         plt.savefig(f"image_{istruct}.png")
 
-## INIT MODEL STRUCTURE BASED ON BAYESIAN NETWORK G STRUCTURE
+    ## INIT MODEL STRUCTURE BASED ON BAYESIAN NETWORK G STRUCTURE
     model_structure = {var: list(G.predecessors(var)) for var in G.nodes()}
     print("\n\nMODEL STRUCTURE: \n\t", model_structure)
 
-#### ESTIMATE PARAMETERS ####
+    #### ESTIMATE PARAMETERS ####
     fit_results = estimate_parameters(model_structure, data, map_nodes_to_indexes)
     associated_data = np.zeros(data.shape)
     for ivar, var_name in enumerate(model_structure.keys()):
@@ -90,22 +90,15 @@ for istruct in range(MAX_ITERATIONS):
     print("FIT RESULTS: \n", pd.DataFrame(fit_results))
     print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
 
+    #### CHAGNE GRAPH BEFORE REPEATING ####
+    random_arc_change(G)
+
 print("\n\nWINNING_STRUCTURE: ",{var: list(winning_graph.predecessors(var)) \
         for var in winning_graph.nodes()})
 
-norm_l2_list = []
-kl = 0
-for ivar in range(data.shape[1]):
-    norm_l2 = np.linalg.norm(associated_data_list[0][:, ivar] - associated_data_list[1][:, ivar], ord=2)
-    norm_l2_list.append(norm_l2)
-    kl_ivar = 0.5 * (
-                    np.log(fit_results_list[1][ivar]["residual_variance"] / fit_results_list[0][ivar]["residual_variance"]) \
-                    + fit_results_list[0][ivar]["residual_variance"] / fit_results_list[1][ivar]["residual_variance"] \
-                    - 1 \
-                    ) \
-                    + 1/(2*data.shape[0]) * ( norm_l2 / fit_results_list[1][ivar]["residual_variance"] )
-    print("KL FOR VAR ", ivar, " : ", kl_ivar)
-    kl += kl_ivar
+
+kl = kl_bn(associated_data_list[0], associated_data_list[1],
+           fit_results_list[0], fit_results_list[1])
 
 
 #### UPDATE STRUCTURE BASED ON SCORE ####
