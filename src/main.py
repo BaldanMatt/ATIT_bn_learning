@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import networkx as nx
-from utils import draw_pgm
+from utils import draw_pgm, random_arc_change
 from core import estimate_parameters
 
 # this is sample data copied from the tutorial paper
@@ -33,11 +33,20 @@ edges_example_2 = [("X1","X2"),("X2","X4"),("X2","X3")]
 structure_pair = (edges_example_1, edges_example_2)
 associated_data_list = []
 fit_results_list = []
-for istruct, edges_example in enumerate(structure_pair):
-    print("STRUCTURE ", edges_example)
-    G = nx.DiGraph()
-    G.add_nodes_from(coulumns_names)
-    G.add_edges_from(edges_example)
+bn_entoropy_old = np.inf
+bn_conditional_entropies = np.ones(len(coulumns_names)) * np.inf
+
+G = nx.DiGraph()
+G.add_nodes_from(coulumns_names)
+G.add_edges_from(edges_example_2)
+winning_graph = G.copy()
+
+
+# for istruct, edges_example in enumerate(structure_pair):
+MAX_ITERATIONS=10
+for istruct in range(MAX_ITERATIONS):
+    print("STRUCTURE ", list(G.edges))
+    random_arc_change(G)
 
     fig, axs = plt.subplots(1, 1, figsize=(5, 5))
     draw_pgm(axs, G)
@@ -48,7 +57,7 @@ for istruct, edges_example in enumerate(structure_pair):
 
 ## INIT MODEL STRUCTURE BASED ON BAYESIAN NETWORK G STRUCTURE
     model_structure = {var: list(G.predecessors(var)) for var in G.nodes()}
-    print("MODEL STRUCTURE: \n\t", model_structure)
+    print("\n\nMODEL STRUCTURE: \n\t", model_structure)
 
 #### ESTIMATE PARAMETERS ####
     fit_results = estimate_parameters(model_structure, data, map_nodes_to_indexes)
@@ -67,11 +76,22 @@ for istruct, edges_example in enumerate(structure_pair):
     #### COMPUTE SCORE ####
     bn_entropy = 0
     for var, results in fit_results.items():
-        bn_entropy += 0.5 + 0.5*np.log(2*np.pi*results["residual_variance"])
+        bn_conditional_entropies[var] = results["residual_variance"]
+        # bn_entropy += 0.5 + 0.5*np.log(2*np.pi*results["residual_variance"])
+
+    bn_entropy = np.sum(1/2*np.log(2*np.pi*bn_conditional_entropies)) \
+            + len(bn_conditional_entropies)/2
+
+    if bn_entropy < bn_entoropy_old :
+        bn_entoropy_old = bn_entropy
+        winning_graph = G.copy()
 
     #### PRINT RESULTS ####
     print("FIT RESULTS: \n", pd.DataFrame(fit_results))
     print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
+
+print("\n\nWINNING_STRUCTURE: ",{var: list(winning_graph.predecessors(var)) \
+        for var in winning_graph.nodes()})
 
 norm_l2_list = []
 kl = 0
