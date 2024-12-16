@@ -42,8 +42,8 @@ args = parser.parse_args()
 if args.simulate:
 # INIT DATA
     N_OBS = 250000
-    N_VARS = 5
-    N_EDGES = N_VARS - 1
+    N_VARS = 10
+    N_EDGES = 2*N_VARS - 1
 ## true model parameters
     mu_vars = np.random.randint(1, 50, N_VARS)
     sigma_vars = np.random.randint(1, 10, N_VARS)
@@ -55,17 +55,13 @@ if args.simulate:
         u, v = random.sample(nodes, 2)
         if u < v:
             edges.add((u, v))
-    true_model_structure = {f"X{i}": [
-        f"X{v}" for u, v in edges if u == i
-        ] for i in nodes}
     map_nodes_to_indexes = {f"X{i}": i for i in nodes}
     map_indexes_to_nodes = {i: f"X{i}" for i in nodes}
-## assert that the true model is DAG
+    ## assert that the true model is DAG
     G = nx.DiGraph()
-    G.add_nodes_from(true_model_structure.keys())
-    for node, parents in true_model_structure.items():
-        for parent in parents:
-            G.add_edge(parent, node)
+    G.add_nodes_from([f"X{i}" for i in nodes])
+    G.add_edges_from([(f"X{u}", f"X{v}") for u, v in edges])
+    true_model_structure = {f"X{i}": [j for j in G.predecessors(f"X{i}")] for i in nodes}
     assert nx.is_directed_acyclic_graph(G), "True model is not a DAG"
 
 ## generate causal data
@@ -115,8 +111,8 @@ else:
     nodes = list(range(N_VARS))
     
 ## Compute entropy score of the true model
-print("TRUE MODEL STRUCTURE: ", true_model_structure)
-#print("DATA: ", data)
+#print("TRUE MODEL STRUCTURE: ", true_model_structure)
+##print("DATA: ", data)
 fit_results = estimate_parameters(true_model_structure, data, map_nodes_to_indexes)
 bn_conditional_entropies = np.ones(N_VARS) * np.inf
 for var, results in fit_results.items():
@@ -126,14 +122,18 @@ true_bn_entropy = np.sum(1/2*np.log(2*np.pi*bn_conditional_entropies)) \
     + len(bn_conditional_entropies)/2
 
 # INIT BOOTSTRAP #
-N_BOOTSTRAPS = 1 
-MAX_ITERATIONS = 10
-EARLY_STOP_TH = 10
+N_BOOTSTRAPS = 10 
+MAX_ITERATIONS = 1000
+EARLY_STOP_TH = 50
 EARLY_STOP_BOOT_COUNTER = 0
 debug = False 
 # define a winning graph to store the best model
 winning_boot_graph = nx.DiGraph()
 winning_boot_bn_entropy = np.inf
+
+# INIT RESULTS #
+
+
 
 parent_dir = Path(__file__).resolve().parents[1]
 # RUN BOOTSTRAP LOOP
@@ -166,7 +166,7 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
 
     for istruct in range(MAX_ITERATIONS):
         ## LOG
-        print("\tITERATION ", istruct)
+        #print("\tITERATION ", istruct)
 #
         ## ESTIMATE PARAMETERS
         model_structure = {var: list(g.predecessors(var)) for var in g.nodes()}
@@ -175,7 +175,7 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
             if node in changed_nodes:
                 new_struct[node] = model_structure[node]
 
-        print("\t\tMODEL to estimate STRUCTURE iter ", istruct, " : \n\t\t", new_struct) 
+        #print("\t\tMODEL to estimate STRUCTURE iter ", istruct, " : \n\t\t", new_struct) 
         fit_results = estimate_parameters(new_struct, data, map_nodes_to_indexes)
         for var, results in fit_results.items():
             g.nodes[var]["intercept"] = results["intercept"]
@@ -193,7 +193,8 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
         ### compute the formula for the entropy
         bn_entropy = np.sum(1/2*np.log(2*np.pi*bn_conditional_entropies)) \
             + len(bn_conditional_entropies)/2
-        
+        if istruct ==0:
+            init_bn_entropy = bn_entropy
         ## Compute KL divergence with winning model
         # first estimate the associated data
         associated_data = associated_data_old.copy()
@@ -207,11 +208,11 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
                     + np.dot(data[:, [map_nodes_to_indexes[var] for var in dependent_vars]],
                              fit_results[var_name]["coefficients"]
                              )
-
+        
         fit_results_kl = {**fit_results_old, **fit_results}
         kl = kl_bn(associated_data, associated_data_old,
                    fit_results_kl, fit_results_old, map_indexes_to_nodes)
-        print("\t\tKL: ", kl)
+        #print("\t\tKL: ", kl)
     
         if debug:
             fig, axs = plt.subplots(1, 1, figsize=(5, 5))
@@ -227,7 +228,7 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
         if bn_entropy < bn_entropy_old:
             EARLY_STOP_COUNTER = 0
             bn_entropy_old = bn_entropy
-            fit_results_old = fit_results.copy()
+            fit_results_old = fit_results_kl.copy()
             associated_data_old = associated_data.copy()
             winning_graph = g.copy()
         else:
@@ -236,14 +237,15 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
             #g = winning_graph.copy()
         
         if EARLY_STOP_COUNTER > EARLY_STOP_TH:
-            print("EARLY STOP..")
+            #print("EARLY STOP..")
             break
         changed_nodes = list()
         for i in range(3):
             edge_removed, edge_added = random_arc_change(g)
-            changed_nodes.append([edge_removed[1], edge_added[1]])
+            changed_nodes.append(edge_removed[1])
+            changed_nodes.append(edge_added[1])
 
-    print("\n\nWINNING_STRUCTURE: ", winning_graph)
+    #print("\n\nWINNING_STRUCTURE: ", winning_graph)
     import matplotlib.gridspec as gridspec
     fig = plt.figure(figsize=(10, 10))
     gs = gridspec.GridSpec(2,2)
@@ -257,7 +259,7 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
 
     ax3 = fig.add_subplot(gs[1,1])
     draw_pgm(ax3, init_g)
-    ax3.set_title("Initial model")
+    ax3.set_title("Initial model | entropy: {:.2f}".format(init_bn_entropy))
     fig.savefig(f"comparison_boot_{jboot}.png")
     del fig, gs, ax1, ax2, ax3
 
@@ -269,10 +271,12 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
         EARLY_STOP_BOOT_COUNTER += 1
     
     if EARLY_STOP_BOOT_COUNTER > EARLY_STOP_TH:
-        print("EARLY STOP BOOTSTRAP..")
+        #print("EARLY STOP BOOTSTRAP..")
         break
 
-print("\n\nWINNING_BOOT_STRUCTURE: ", winning_boot_graph)
+
+
+#print("\n\nWINNING_BOOT_STRUCTURE: ", winning_boot_graph)
 fig = plt.figure(figsize=(10, 10))
 gs = gridspec.GridSpec(1,2)
 ax1 = fig.add_subplot(gs[0])
@@ -284,7 +288,7 @@ ax2.set_title("Winning boot model | entropy: {:.2f}".format(winning_boot_bn_entr
 fig.savefig("comparison.png")
 del fig, gs, ax1, ax2
 #
-    #print("STRUCTURE ", list(g.edges))
+    ##print("STRUCTURE ", list(g.edges))
     #
     #fig, axs = plt.subplots(1, 1, figsize=(5, 5))
     #draw_pgm(axs, g)
@@ -295,7 +299,7 @@ del fig, gs, ax1, ax2
 #
     # INIT MODEL STRUCTURE BASED ON BAYESIAN NETWORK G STRUCTURE
     #model_structure = {var: list(g.predecessors(var)) for var in g.nodes()}
-    #print("\n\nMODEL STRUCTURE iter ", istruct, " : \n\t", model_structure)
+    ##print("\n\nMODEL STRUCTURE iter ", istruct, " : \n\t", model_structure)
 #
     ### ESTIMATE PARAMETERS ####
     #fit_results = estimate_parameters(model_structure, data, map_nodes_to_indexes)
@@ -331,8 +335,8 @@ del fig, gs, ax1, ax2
         #EARLY_STOP_COUNTER += 1
 #
     ### PRINT RESULTS ####
-    #print("FIT RESULTS: \n", pd.DataFrame(fit_results))
-    #print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
+    ##print("FIT RESULTS: \n", pd.DataFrame(fit_results))
+    ##print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
 #
     #if EARLY_STOP_COUNTER > EARLY_STOP_TH:
         #break
@@ -340,7 +344,7 @@ del fig, gs, ax1, ax2
     ### CHANGE GRAPH BEFORE REPEATING ####
     #edge_removed, edge_added = random_arc_change(g)
 # PRINT BEST MODEL
-#print("\n\nWINNING_STRUCTURE: ", winning_graph) \
+##print("\n\nWINNING_STRUCTURE: ", winning_graph) \
 
 #edges_example_1 = [("X1","X4"),("X2","X4"),("X4","X3")]
 #edges_example_2 = [("X1","X2"),("X2","X4"),("X2","X3")]
@@ -363,8 +367,8 @@ del fig, gs, ax1, ax2
 #changed_nodes=list(G.nodes)
 #associated_data_old = np.zeros(data.shape)
 #for istruct in range(MAX_ITERATIONS):
-    #print("STRUCTURE ", list(G.edges))
-    #print("CHANGED NODES ", changed_nodes)
+    ##print("STRUCTURE ", list(G.edges))
+    ##print("CHANGED NODES ", changed_nodes)
 #
     #fig, axs = plt.subplots(1, 1, figsize=(5, 5))
     #draw_pgm(axs, G)
@@ -375,13 +379,13 @@ del fig, gs, ax1, ax2
 #
     # INIT MODEL STRUCTURE BASED ON BAYESIAN NETWORK G STRUCTURE
     #model_structure = {var: list(G.predecessors(var)) for var in G.nodes()}
-    #print("\n\nMODEL STRUCTURE: \n\t", model_structure)
+    ##print("\n\nMODEL STRUCTURE: \n\t", model_structure)
     #new_struct = dict()
     #for node in model_structure.keys():
         #if node in changed_nodes:
             #new_struct[node] = model_structure[node]
     #model_structure = new_struct
-    #print("CHANGED STRUCTURE: \n\t", model_structure)
+    ##print("CHANGED STRUCTURE: \n\t", model_structure)
 #
     ### ESTIMATE PARAMETERS ####
     #fit_results = estimate_parameters(model_structure, data, map_nodes_to_indexes)
@@ -395,7 +399,7 @@ del fig, gs, ax1, ax2
             #associated_data[:,ivar] = fit_results[ivar]["intercept"] \
                     #+ np.dot(data[:, [map_nodes_to_indexes[var] for var in dependent_vars]], fit_results[ivar]["coefficients"])
 #
- #    print("ASSOCIATED DATA: \n", associated_data)
+ #    #print("ASSOCIATED DATA: \n", associated_data)
     #associated_data_list.append(associated_data)
     #fit_results_list.append(fit_results)
 #
@@ -417,8 +421,8 @@ del fig, gs, ax1, ax2
         #EARLY_STOP_COUNTER += 1
 #
     ### PRINT RESULTS ####
-    #print("FIT RESULTS: \n", pd.DataFrame(fit_results))
-    #print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
+    ##print("FIT RESULTS: \n", pd.DataFrame(fit_results))
+    ##print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
 #
     #if EARLY_STOP_COUNTER > EARLY_STOP_TH:
         #break
@@ -427,7 +431,7 @@ del fig, gs, ax1, ax2
     #edge_removed, edge_added = random_arc_change(G)
     #changed_nodes=[edge_removed[1], edge_added[1]]
 #
-#print("\n\nWINNING_STRUCTURE: ",{var: list(winning_graph.predecessors(var)) \
+##print("\n\nWINNING_STRUCTURE: ",{var: list(winning_graph.predecessors(var)) \
         #for var in winning_graph.nodes()})
 #
 #
@@ -438,4 +442,4 @@ del fig, gs, ax1, ax2
 ### UPDATE STRUCTURE BASED ON SCORE ####
 #### COMPUTE ALL LEGAL MOVES ######
 #
-#print("KL BETWEEN EXAMPLES: ", kl)
+##print("KL BETWEEN EXAMPLES: ", kl)

@@ -54,7 +54,7 @@ def kl_bn(associated_data_old, associated_data_new, fit_results_old, fit_results
                         - 1 \
                         ) \
                         + 1/(2*associated_data_old.shape[0]) * ( norm_l2 / fit_results_new[var]["residual_variance"] )
-        print("KL FOR VAR ", ivar, " : ", kl_ivar)
+        #print("KL FOR VAR ", ivar, " : ", kl_ivar)
         kl += kl_ivar
     return kl
 
