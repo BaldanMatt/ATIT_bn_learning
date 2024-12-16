@@ -47,6 +47,7 @@ EARLY_STOP_TH=3
 # the first time we have to compute all nodes' entropies
 changed_nodes=list(G.nodes)
 associated_data_old = np.zeros(data.shape)
+fit_results_old = dict()
 for istruct in range(MAX_ITERATIONS):
     print("STRUCTURE ", list(G.edges))
     print("CHANGED NODES ", changed_nodes)
@@ -70,6 +71,8 @@ for istruct in range(MAX_ITERATIONS):
 
     #### ESTIMATE PARAMETERS ####
     fit_results = estimate_parameters(model_structure, data, map_nodes_to_indexes)
+    for key in fit_results.keys():
+        fit_results_old[key] = fit_results[key]
     associated_data = associated_data_old.copy()
     for var_name in model_structure.keys():
         ivar = map_nodes_to_indexes[var_name]
@@ -79,10 +82,11 @@ for istruct in range(MAX_ITERATIONS):
         else:
             associated_data[:,ivar] = fit_results[ivar]["intercept"] \
                     + np.dot(data[:, [map_nodes_to_indexes[var] for var in dependent_vars]], fit_results[ivar]["coefficients"])
+    associated_data_old = associated_data
 
-    # print("ASSOCIATED DATA: \n", associated_data)
+    print("ASSOCIATED DATA: \n", associated_data)
     associated_data_list.append(associated_data)
-    fit_results_list.append(fit_results)
+    fit_results_list.append(fit_results_old)
 
     #### COMPUTE SCORE ####
     bn_entropy = 0
