@@ -41,8 +41,8 @@ args = parser.parse_args()
 
 if args.simulate:
 # INIT DATA
-    N_OBS = 100000
-    N_VARS =6 
+    N_OBS = 250000
+    N_VARS = 5
     N_EDGES = N_VARS - 1
 ## true model parameters
     mu_vars = np.random.randint(1, 50, N_VARS)
@@ -58,7 +58,8 @@ if args.simulate:
     true_model_structure = {f"X{i}": [
         f"X{v}" for u, v in edges if u == i
         ] for i in nodes}
-    map_nodes_to_indexes = {f"X{i}": i for i in nodes}  
+    map_nodes_to_indexes = {f"X{i}": i for i in nodes}
+    map_indexes_to_nodes = {i: f"X{i}" for i in nodes}
 ## assert that the true model is DAG
     G = nx.DiGraph()
     G.add_nodes_from(true_model_structure.keys())
@@ -108,13 +109,14 @@ else:
     df = df.dropna()
     data = df.to_numpy()
     map_nodes_to_indexes = {node: i for i, node in enumerate(df.columns)}
+    map_indexes_to_nodes = {i: node for i, node in enumerate(df.columns)}
     N_OBS, N_VARS = data.shape
     N_EDGES = 3
     nodes = list(range(N_VARS))
     
 ## Compute entropy score of the true model
 print("TRUE MODEL STRUCTURE: ", true_model_structure)
-print("DATA: ", data)
+#print("DATA: ", data)
 fit_results = estimate_parameters(true_model_structure, data, map_nodes_to_indexes)
 bn_conditional_entropies = np.ones(N_VARS) * np.inf
 for var, results in fit_results.items():
@@ -124,9 +126,9 @@ true_bn_entropy = np.sum(1/2*np.log(2*np.pi*bn_conditional_entropies)) \
     + len(bn_conditional_entropies)/2
 
 # INIT BOOTSTRAP #
-N_BOOTSTRAPS = 5 
-MAX_ITERATIONS = 20
-EARLY_STOP_TH = 20
+N_BOOTSTRAPS = 1 
+MAX_ITERATIONS = 10
+EARLY_STOP_TH = 10
 EARLY_STOP_BOOT_COUNTER = 0
 debug = False 
 # define a winning graph to store the best model
@@ -156,10 +158,12 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
     bn_entropy_old = np.inf
     bn_conditional_entropies = np.ones(N_VARS) * np.inf
     winning_graph = g.copy()
-
+    associated_data_old = np.zeros(data.shape)
+    fit_results_old = estimate_parameters({var: list(g.predecessors(var)) for var in g.nodes()}, data, map_nodes_to_indexes)
     # run iteration loop
     EALRY_STOP_COUNTER = 0
     changed_nodes = list(g.nodes)
+
     for istruct in range(MAX_ITERATIONS):
         ## LOG
         print("\tITERATION ", istruct)
@@ -189,7 +193,26 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
         ### compute the formula for the entropy
         bn_entropy = np.sum(1/2*np.log(2*np.pi*bn_conditional_entropies)) \
             + len(bn_conditional_entropies)/2
-           
+        
+        ## Compute KL divergence with winning model
+        # first estimate the associated data
+        associated_data = associated_data_old.copy()
+        for var_name in new_struct.keys():
+            ivar = map_nodes_to_indexes[var_name]
+            dependent_vars = new_struct.get(var_name, [])
+            if len(dependent_vars) == 0:
+                associated_data[:, ivar] = fit_results[var_name]["intercept"]
+            else:
+                associated_data[:, ivar] = fit_results[var_name]["intercept"] \
+                    + np.dot(data[:, [map_nodes_to_indexes[var] for var in dependent_vars]],
+                             fit_results[var_name]["coefficients"]
+                             )
+
+        fit_results_kl = {**fit_results_old, **fit_results}
+        kl = kl_bn(associated_data, associated_data_old,
+                   fit_results_kl, fit_results_old, map_indexes_to_nodes)
+        print("\t\tKL: ", kl)
+    
         if debug:
             fig, axs = plt.subplots(1, 1, figsize=(5, 5))
             draw_pgm(axs, g)
@@ -204,6 +227,8 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
         if bn_entropy < bn_entropy_old:
             EARLY_STOP_COUNTER = 0
             bn_entropy_old = bn_entropy
+            fit_results_old = fit_results.copy()
+            associated_data_old = associated_data.copy()
             winning_graph = g.copy()
         else:
             EARLY_STOP_COUNTER += 1
@@ -213,8 +238,10 @@ for jboot in range(N_BOOTSTRAPS): # Start bootstrap loop
         if EARLY_STOP_COUNTER > EARLY_STOP_TH:
             print("EARLY STOP..")
             break
-        edge_removed, edge_added = random_arc_change(g)
-        changed_nodes=[edge_removed[1], edge_added[1]]
+        changed_nodes = list()
+        for i in range(3):
+            edge_removed, edge_added = random_arc_change(g)
+            changed_nodes.append([edge_removed[1], edge_added[1]])
 
     print("\n\nWINNING_STRUCTURE: ", winning_graph)
     import matplotlib.gridspec as gridspec
