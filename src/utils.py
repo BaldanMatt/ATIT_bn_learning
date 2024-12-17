@@ -16,6 +16,8 @@ def draw_pgm(ax, model, pos: dict = None, title: str = None):
     
     if pos is None:
         pos = nx.multipartite_layout(g, subset_key="layer")
+    elif pos == "circular":
+        pos = nx.circular_layout(g)
 
     nx.draw(g, pos,
         with_labels=True,
