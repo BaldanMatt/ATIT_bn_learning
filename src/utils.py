@@ -46,5 +46,31 @@ def random_arc_change(graph : nx.DiGraph):
     if not nx.is_directed_acyclic_graph(graph):
         raise ValueError("Tua madre mucca non sai come funzionano i grafi")
 
-    return (edge_removed, edge_added)
+    return (edge_removed[1], edge_added[1])
+
+def due_opt(graph : nx.DiGraph):
+    """
+    Picks two pairs of nodes and swaps the children.
+    """
+    nodes = list(nx.topological_sort(graph))
+    children = nodes[0:2]
+    parents = nodes[-2:]
+    while (max(nodes.index(parents[0]), nodes.index(parents[1])) >= min(nodes.index(children[0]), nodes.index(children[1]))):
+        new_children = random.sample(nodes, 2)
+        predecessors1 = [ i for i in graph.predecessors(new_children[0]) if i not in graph.predecessors(new_children[1])]
+        if len(predecessors1) == 0: continue
+        predecessors2 = [ i for i in graph.predecessors(new_children[1]) if i not in graph.predecessors(new_children[0])]
+        if len(predecessors2) == 0: continue
+        children = new_children
+        parents = [
+            *random.sample(predecessors1, k=1),
+            *random.sample(predecessors2, k=1)
+        ]
+    graph.remove_edge(parents[0], children[0])
+    graph.remove_edge(parents[1], children[1])
+    graph.add_edge(parents[0], children[1])
+    graph.add_edge(parents[1], children[0])
+    return tuple(children)
+
+
 

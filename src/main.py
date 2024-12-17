@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 import networkx as nx
 import random
-from utils import draw_pgm, random_arc_change
+from utils import draw_pgm, random_arc_change, due_opt
 from core import estimate_parameters, kl_bn
 from pathlib import Path
 import os
@@ -287,9 +287,10 @@ for jboot in tqdm(range(N_BOOTSTRAPS)): # Start bootstrap loop
             break
         changed_nodes = list()
         for i in range(1):
-            edge_removed, edge_added = random_arc_change(g)
-            changed_nodes.append(edge_removed[1])
-            changed_nodes.append(edge_added[1])
+            # child1, child2 = random_arc_change(g)
+            child1, child2 = due_opt(g)
+            changed_nodes.append(child1)
+            changed_nodes.append(child2)
 
         bn_best_entropies[jboot].append(bn_entropy_old)
         bn_best_kl_with_true[jboot].append(kl_with_true)
