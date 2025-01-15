@@ -8,7 +8,6 @@ def estimate_parameters(structure : dict, data : np.array, map_nodes_to_indexes 
     The structure must be a dict that maps each variable node to the list of
     parents
     The map_nodes_to_indexes is needed to define which coulumn corresponds to which node
-    TODO: maybe switch to dataframe for data
     """
     n_obs, n_vars = data.shape
     fit_results = {}

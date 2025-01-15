@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import random
 
 def draw_pgm(ax, model, pos: dict = None, title: str = None):
+    """
+    Draw a DAG model with matplotlib and networkx
+    """
     #Init network instance
     g = nx.DiGraph()
 
@@ -56,6 +59,7 @@ def due_opt(graph : nx.DiGraph):
     children = nodes[0:2]
     parents = nodes[-2:]
     while (max(nodes.index(parents[0]), nodes.index(parents[1])) >= min(nodes.index(children[0]), nodes.index(children[1]))):
+        #print("retrying")
         new_children = random.sample(nodes, 2)
         predecessors1 = [ i for i in graph.predecessors(new_children[0]) if i not in graph.predecessors(new_children[1])]
         if len(predecessors1) == 0: continue

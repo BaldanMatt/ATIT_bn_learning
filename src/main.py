@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-
+# IMPORTING LIBRARIES
 import numpy as np
 import pandas as pd
 import matplotlib
 #matplotlib.interactive(True)
+import bnlearn as bn
 import matplotlib.pyplot as plt
 
 import networkx as nx
@@ -13,25 +14,21 @@ from core import estimate_parameters, kl_bn
 from pathlib import Path
 import os
 from tqdm import tqdm
-# this is sample data copied from the tutorial paper
-#data = np.array([
-    #[3.626, 2.811, 17.683, 12.626],
-    #[1.895, 3.571, 15.320, 10.459],
-    #[2.725, 0.724, 10.270,  5.990],
-    #[2.966, 1.584, 13.572, 10.042],
-    #[2.762, 1.697, 15.469, 10.742],
-    #[2.305, 2.293, 11.471,  9.167],
-    #[3.752, 1.580, 12.955,  9.666],
-    #[2.315, -0.258, 2.677,  1.154],
-    #[4.205, -0.090, 7.916,  6.756],
-    #[2.344, 2.823, 14.594, 10.383]
-#])
-#coulumns_names=['X1', 'X2', 'X3', 'X4']
-#df = pd.DataFrame(data, columns=coulumns_names)
-#map_nodes_to_indexes = {node: i for i, node in enumerate(coulumns_names)}
-#
 import argparse
 
+# GLOBAL VARIABLES
+N_OBS = 10000
+N_VARS = 8 
+N_EDGES = 2*N_VARS - 1
+DO_BNLEARN = False
+DO_OPT = True
+# INIT BOOTSTRAP #
+N_BOOTSTRAPS = 50
+MAX_ITERATIONS = 100
+EARLY_STOP_TH = 50
+EARLY_STOP_BOOT_COUNTER = 0
+
+# SET COMMAND LINE PARSER FUNCTIONALITIES
 parser = argparse.ArgumentParser(description='Bayesian Network Structure Learning')
 # Add a command line argument that simulates some data or uses an example
 parser.add_argument('--simulate', action='store_true', help='Simulate data')
@@ -39,16 +36,21 @@ parser.add_argument('--example', action='store_true', help='Use example data')
 parser.add_argument('--dataset', type=str, help='Use a dataset from the data folder')
 args = parser.parse_args()
 
+# MAIN FUNCTION
 if args.simulate:
-# INIT DATA
-    N_OBS = 100000
-    N_VARS = 10 
-    N_EDGES = 2*N_VARS - 1
-## true model parameters
+    """
+    If the simulate flag is set, we simulate a dataset with a DAG structure and
+    accordingly to the edges of the DAG we create an instance of a multivariate
+    gaussian distribution. The parameters of the distribution are randomly generated
+    from some ranges. 
+
+    The nodes connected byy edges share a linear dependency with the parent nodes
+    """
+    ## true model parameters
     mu_vars = np.random.randint(1, 50, N_VARS)
     sigma_vars = np.random.randint(1, 10, N_VARS)
 
-## generate true model structure
+    ## generate true model structure
     nodes = list(range(N_VARS))
     edges = set()
     while len(edges) < N_EDGES:
@@ -64,7 +66,7 @@ if args.simulate:
     true_model_structure = {f"X{i}": [j for j in G.predecessors(f"X{i}")] for i in nodes}
     assert nx.is_directed_acyclic_graph(G), "True model is not a DAG"
 
-## generate causal data
+    ## generate causal data
     data = np.zeros((N_OBS, N_VARS))
     topological_order = list(nx.topological_sort(G)) # ensures to process parents before children
     for node in topological_order:
@@ -74,9 +76,10 @@ if args.simulate:
             data[:, inode] = np.random.normal(mu_vars[inode], sigma_vars[inode], N_OBS)
         else:
             data[:, inode] = np.sum(data[:, [map_nodes_to_indexes[parent] for parent in parents]], axis = 1) + np.random.normal(mu_vars[inode], sigma_vars[inode]/len(parents), N_OBS) 
-## store data in a pandas DataFrame
+
+    ## store data in a pandas DataFrame
     df = pd.DataFrame(data, columns=[f"X{i}" for i in nodes])
-## inspect the data distributions
+    ## inspect the data distributions
     fig, axs = plt.subplots(ncols = 2, figsize=(10, 5))
     for node in nodes:
         axs[1].hist(data[:, node], bins=30, alpha=0.5, label=f"X{node}")
@@ -84,7 +87,11 @@ if args.simulate:
     draw_pgm(axs[0], G)
     fig.savefig("simulated_data.png")
     del fig, axs
-else:
+else: # Not args.simulate
+    """
+    If the simulate flag is not set, we load a dataset from the data folder and
+    use that to learn its bayesian network structure. We also use the bnlearn library
+    """
     # MAJOR TODO
     ## NEED to fix the map nodes to indexes to generalize name of the columns
     ## NEED to fix the idea that toy dataset are not multivariate gaussian distribution
@@ -111,16 +118,16 @@ else:
     nodes = list(range(N_VARS))
     
 ## Compute entropy score of the true model
-#print("TRUE MODEL STRUCTURE: ", true_model_structure)
-##print("DATA: ", data)
 true_fit_results = estimate_parameters(true_model_structure, data, map_nodes_to_indexes)
 bn_conditional_entropies = np.ones(N_VARS) * np.inf
+
 for var, results in true_fit_results.items():
     ivar = map_nodes_to_indexes[var]
     bn_conditional_entropies[ivar] = results["residual_variance"]
 true_bn_entropy = np.sum(1/2*np.log(2*np.pi*bn_conditional_entropies)) \
     + len(bn_conditional_entropies)/2
 true_associated_data = np.zeros(data.shape)
+
 for var_name in true_model_structure.keys():
     ivar = map_nodes_to_indexes[var_name]
     dependent_vars = true_model_structure.get(var_name, [])
@@ -132,11 +139,10 @@ for var_name in true_model_structure.keys():
                      true_fit_results[var_name]["coefficients"]
                      )
 
-import bnlearn as bn
-## COmpute library estimated model
+## Compute library estimated model (bnlearn)
 df_data = pd.DataFrame(data, columns=G.nodes) # convert to pandas DataFrame
 est_G = nx.DiGraph()
-if N_VARS <= 10:
+if N_VARS <= 10 and DO_BNLEARN:
     est_G.add_nodes_from(G.nodes)
     bn_model = bn.structure_learning.fit(df_data, methodtype="hc", scoretype="k2")
     est_G.add_edges_from(bn_model["model_edges"])
@@ -165,13 +171,13 @@ if N_VARS <= 10:
 else:
     kl_est = np.inf
     est_bn_entropy = np.inf
-# INIT BOOTSTRAP #
-N_BOOTSTRAPS = 10
-MAX_ITERATIONS = 150
-EARLY_STOP_TH = 30
-EARLY_STOP_BOOT_COUNTER = 0
-debug = False 
-# define a winning graph to store the best model
+
+"""
+BOOTSTRAP LOOP to learn multiple bayesian network structures and search for the ones
+that minimizes the entropy score. The loop is stopped when the entropy score does not
+update. The structure is updated by changing the arcs of the graph.
+"""
+debug = False # define a winning graph to store the best model
 winning_boot_graph = nx.DiGraph()
 winning_boot_bn_entropy = np.inf
 
@@ -179,12 +185,14 @@ winning_boot_bn_entropy = np.inf
 bn_best_entropies = {jboot: [] for jboot in range(N_BOOTSTRAPS)}
 bn_best_kl_with_true = {jboot: [] for jboot in range(N_BOOTSTRAPS)}
 
+# define the parent directory
 parent_dir = Path(__file__).resolve().parents[1]
+
 # RUN BOOTSTRAP LOOP
 for jboot in tqdm(range(N_BOOTSTRAPS)): # Start bootstrap loop
     if not os.path.exists(parent_dir / "bootstrap" / f"bootstrap_{jboot}"):
         os.makedirs(parent_dir / "bootstrap" / f"bootstrap_{jboot}")
-    print("BOOTSTRAP ", jboot)
+    #print("BOOTSTRAP ", jboot)
     # init structure
     g = nx.DiGraph()
     ### start from a random configuration of a DAG model with N_VARS nodes
@@ -211,7 +219,7 @@ for jboot in tqdm(range(N_BOOTSTRAPS)): # Start bootstrap loop
     for istruct in range(MAX_ITERATIONS):
         ## LOG
         #print("\tITERATION ", istruct)
-#
+
         ## ESTIMATE PARAMETERS
         model_structure = {var: list(g.predecessors(var)) for var in g.nodes()}
         new_struct = dict()
@@ -239,6 +247,7 @@ for jboot in tqdm(range(N_BOOTSTRAPS)): # Start bootstrap loop
             + len(bn_conditional_entropies)/2
         if istruct ==0:
             init_bn_entropy = bn_entropy
+
         ## Compute KL divergence with winning model
         # first estimate the associated data
         associated_data = associated_data_old.copy()
@@ -258,7 +267,6 @@ for jboot in tqdm(range(N_BOOTSTRAPS)): # Start bootstrap loop
                    fit_results_kl, fit_results_old, map_indexes_to_nodes)
         kl_with_true = kl_bn(associated_data_old, true_associated_data,
                              fit_results_old, true_fit_results, map_indexes_to_nodes)
-        #print("\t\tKL: ", kl)
     
         if debug:
             fig, axs = plt.subplots(1, 1, figsize=(5, 5))
@@ -280,15 +288,18 @@ for jboot in tqdm(range(N_BOOTSTRAPS)): # Start bootstrap loop
         else:
             EARLY_STOP_COUNTER += 1
             # reset to last best
-            #g = winning_graph.copy()
+            if DO_OPT:
+                g = winning_graph.copy()
         
         if EARLY_STOP_COUNTER > EARLY_STOP_TH:
             #print("EARLY STOP..")
             break
         changed_nodes = list()
         for i in range(1):
-            # child1, child2 = random_arc_change(g)
-            child1, child2 = due_opt(g)
+            if not DO_OPT:
+                child1, child2 = random_arc_change(g)
+            else:
+                child1, child2 = due_opt(g)
             changed_nodes.append(child1)
             changed_nodes.append(child2)
 
@@ -382,159 +393,3 @@ bn_best_entropies_df = {k: v + [None] * (max_length - len(v)) for k, v in bn_bes
 bn_best_entropies_df = pd.DataFrame(bn_best_entropies_df)
 bn_best_entropies_df.to_csv(parent_dir / "media" / f"nobs{N_OBS}_nvars{N_VARS}_nboots{N_BOOTSTRAPS}_niter{MAX_ITERATIONS}_nedges{N_EDGES}" / "entropy.csv", index=False)
 
-#
-    ##print("STRUCTURE ", list(g.edges))
-    #
-    #fig, axs = plt.subplots(1, 1, figsize=(5, 5))
-    #draw_pgm(axs, g)
-    #if plt.isinteractive():
-        #plt.show()
-    #else:
-        #plt.savefig(f"image_{istruct}.png")
-#
-    # INIT MODEL STRUCTURE BASED ON BAYESIAN NETWORK G STRUCTURE
-    #model_structure = {var: list(g.predecessors(var)) for var in g.nodes()}
-    ##print("\n\nMODEL STRUCTURE iter ", istruct, " : \n\t", model_structure)
-#
-    ### ESTIMATE PARAMETERS ####
-    #fit_results = estimate_parameters(model_structure, data, map_nodes_to_indexes)
-    #associated_data = np.zeros(data.shape)
-    #for var_name in model_structure.keys():
-        #ivar = map_nodes_to_indexes[var_name]
-        #dependent_vars = model_structure.get(var_name, [])
-        #if len(dependent_vars) == 0:
-            #associated_data[:, ivar] = fit_results[ivar]["intercept"]
-        #else:
-            #associated_data[:, ivar] = fit_results[ivar]["intercept"] \
-                #+ np.dot(data[:, [map_nodes_to_indexes[var] for var in dependent_vars]], fit_results[ivar]["coefficients"])
-#
-    ### COMPUTE SCORE ####
-    #bn_entropy = 0
-    #for var, results in fit_results.items():
-        #bn_conditional_entropies[var] = results["residual_variance"]
-    #bn_entropy = np.sum(1/2*np.log(2*np.pi*bn_conditional_entropies)) \
-        #+ len(bn_conditional_entropies)/2
-#
-    #if bn_entropy < bn_entropy_old:
-        #bn_entropy_old = bn_entropy
-        #winning_graph = g.copy()
-        #for var_name in model_structure.keys():
-            #ivar = map_nodes_to_indexes[var_name]
-#             Add to all winning graph nodes the intercept and residual variance of the nodes i have changed
-            #winning_graph.nodes[var_name]["intercept"] = fit_results[ivar]["intercept"]
-            #winning_graph.nodes[var_name]["residual_variance"] = fit_results[ivar]["residual_variance"]
- #            Add to all the edges incoming to var_name the coefficients with the related parent
-    #else:
-  #       reset to last best
-        #g = winning_graph.copy()
-        #EARLY_STOP_COUNTER += 1
-#
-    ### PRINT RESULTS ####
-    ##print("FIT RESULTS: \n", pd.DataFrame(fit_results))
-    ##print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
-#
-    #if EARLY_STOP_COUNTER > EARLY_STOP_TH:
-        #break
-#
-    ### CHANGE GRAPH BEFORE REPEATING ####
-    #edge_removed, edge_added = random_arc_change(g)
-# PRINT BEST MODEL
-##print("\n\nWINNING_STRUCTURE: ", winning_graph) \
-
-#edges_example_1 = [("X1","X4"),("X2","X4"),("X4","X3")]
-#edges_example_2 = [("X1","X2"),("X2","X4"),("X2","X3")]
-#
-#structure_pair = (edges_example_1, edges_example_2)
-#associated_data_list = []
-#fit_results_list = []
-#bn_entoropy_old = np.inf
-#bn_conditional_entropies = np.ones(len(coulumns_names)) * np.inf
-#
-#G = nx.DiGraph()
-#G.add_nodes_from(coulumns_names)
-#G.add_edges_from(edges_example_2)
-#winning_graph = G.copy()
-#
-#MAX_ITERATIONS=10
-#EARLY_STOP_COUNTER=0
-#EARLY_STOP_TH=3
-#the first time we have to compute all nodes' entropies
-#changed_nodes=list(G.nodes)
-#associated_data_old = np.zeros(data.shape)
-#for istruct in range(MAX_ITERATIONS):
-    ##print("STRUCTURE ", list(G.edges))
-    ##print("CHANGED NODES ", changed_nodes)
-#
-    #fig, axs = plt.subplots(1, 1, figsize=(5, 5))
-    #draw_pgm(axs, G)
-    #if plt.isinteractive():
-        #plt.show()
-    #else:
-        #plt.savefig(f"image_{istruct}.png")
-#
-    # INIT MODEL STRUCTURE BASED ON BAYESIAN NETWORK G STRUCTURE
-    #model_structure = {var: list(G.predecessors(var)) for var in G.nodes()}
-    ##print("\n\nMODEL STRUCTURE: \n\t", model_structure)
-    #new_struct = dict()
-    #for node in model_structure.keys():
-        #if node in changed_nodes:
-            #new_struct[node] = model_structure[node]
-    #model_structure = new_struct
-    ##print("CHANGED STRUCTURE: \n\t", model_structure)
-#
-    ### ESTIMATE PARAMETERS ####
-    #fit_results = estimate_parameters(model_structure, data, map_nodes_to_indexes)
-    #associated_data = associated_data_old.copy()
-    #for var_name in model_structure.keys():
-        #ivar = map_nodes_to_indexes[var_name]
-        #dependent_vars = model_structure.get(var_name, [])
-        #if len(dependent_vars)==0:
-            #associated_data[:, ivar] = fit_results[ivar]["intercept"]
-        #else:
-            #associated_data[:,ivar] = fit_results[ivar]["intercept"] \
-                    #+ np.dot(data[:, [map_nodes_to_indexes[var] for var in dependent_vars]], fit_results[ivar]["coefficients"])
-#
- #    #print("ASSOCIATED DATA: \n", associated_data)
-    #associated_data_list.append(associated_data)
-    #fit_results_list.append(fit_results)
-#
-    ### COMPUTE SCORE ####
-    #bn_entropy = 0
-    #for var, results in fit_results.items():
-        #bn_conditional_entropies[var] = results["residual_variance"]
-  #       bn_entropy += 0.5 + 0.5*np.log(2*np.pi*results["residual_variance"])
-#
-    #bn_entropy = np.sum(1/2*np.log(2*np.pi*bn_conditional_entropies)) \
-            #+ len(bn_conditional_entropies)/2
-#
-    #if bn_entropy < bn_entoropy_old :
-        #bn_entoropy_old = bn_entropy
-        #winning_graph = G.copy()
-    #else:
-       #  reset to last best
-        #G = winning_graph.copy()
-        #EARLY_STOP_COUNTER += 1
-#
-    ### PRINT RESULTS ####
-    ##print("FIT RESULTS: \n", pd.DataFrame(fit_results))
-    ##print("BAYESIAN NETWORK ENTROPY: ", bn_entropy)
-#
-    #if EARLY_STOP_COUNTER > EARLY_STOP_TH:
-        #break
-#
-    ### CHAGNE GRAPH BEFORE REPEATING ####
-    #edge_removed, edge_added = random_arc_change(G)
-    #changed_nodes=[edge_removed[1], edge_added[1]]
-#
-##print("\n\nWINNING_STRUCTURE: ",{var: list(winning_graph.predecessors(var)) \
-        #for var in winning_graph.nodes()})
-#
-#
-#kl = kl_bn(associated_data_list[0], associated_data_list[1],
-           #fit_results_list[0], fit_results_list[1])
-#
-#
-### UPDATE STRUCTURE BASED ON SCORE ####
-#### COMPUTE ALL LEGAL MOVES ######
-#
-##print("KL BETWEEN EXAMPLES: ", kl)
