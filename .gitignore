@@ -1,0 +1,4 @@
+*.png
+media/
+bootstrap/
+**/__pycache__/*
