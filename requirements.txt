@@ -1,0 +1,7 @@
+numpy
+bnlearn
+pandas
+matplotlib
+networkx
+tqdm
+scikit-learn
